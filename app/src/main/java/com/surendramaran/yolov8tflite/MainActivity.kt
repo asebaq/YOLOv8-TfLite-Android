@@ -30,7 +30,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     private var imageAnalyzer: ImageAnalysis? = null
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
-    private var detector: Detector? = null
+    private lateinit var detector: Detector
 
     private lateinit var cameraExecutor: ExecutorService
 
@@ -39,12 +39,8 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
-
-        cameraExecutor.execute {
-            detector = Detector(baseContext, MODEL_PATH, LABELS_PATH, this)
-            detector?.setup()
-        }
+        detector = Detector(baseContext, MODEL_PATH, LABELS_PATH, this)
+        detector.setup()
 
         if (allPermissionsGranted()) {
             startCamera()
@@ -52,22 +48,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
 
-        bindListeners()
-    }
-
-    private fun bindListeners() {
-        binding.apply {
-            isGpu.setOnCheckedChangeListener { buttonView, isChecked ->
-                cameraExecutor.submit {
-                    detector?.setup(isGpu = isChecked)
-                }
-                if (isChecked) {
-                    buttonView.setBackgroundColor(ContextCompat.getColor(baseContext, R.color.orange))
-                } else {
-                    buttonView.setBackgroundColor(ContextCompat.getColor(baseContext, R.color.gray))
-                }
-            }
-        }
+        cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
     private fun startCamera() {
@@ -128,7 +109,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 matrix, true
             )
 
-            detector?.detect(rotatedBitmap)
+            detector.detect(rotatedBitmap)
         }
 
         cameraProvider.unbindAll()
@@ -158,7 +139,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
     override fun onDestroy() {
         super.onDestroy()
-        detector?.close()
+        detector.clear()
         cameraExecutor.shutdown()
     }
 
@@ -180,9 +161,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     }
 
     override fun onEmptyDetect() {
-        runOnUiThread {
-            binding.overlay.clear()
-        }
+        binding.overlay.invalidate()
     }
 
     override fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {

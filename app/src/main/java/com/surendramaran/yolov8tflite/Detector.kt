@@ -5,8 +5,6 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.CompatibilityList
-import org.tensorflow.lite.gpu.GpuDelegate
 import org.tensorflow.lite.support.common.FileUtil
 import org.tensorflow.lite.support.common.ops.CastOp
 import org.tensorflow.lite.support.common.ops.NormalizeOp
@@ -22,7 +20,7 @@ class Detector(
     private val context: Context,
     private val modelPath: String,
     private val labelPath: String,
-    private val detectorListener: DetectorListener,
+    private val detectorListener: DetectorListener
 ) {
 
     private var interpreter: Interpreter? = null
@@ -38,31 +36,10 @@ class Detector(
         .add(CastOp(INPUT_IMAGE_TYPE))
         .build()
 
-    fun setup(isGpu: Boolean = true) {
-
-        if (interpreter != null) {
-            close()
-        }
-
-        val options = if (isGpu) {
-            val compatList = CompatibilityList()
-
-            Interpreter.Options().apply{
-                if(compatList.isDelegateSupportedOnThisDevice){
-                    val delegateOptions = compatList.bestOptionsForThisDevice
-                    this.addDelegate(GpuDelegate(delegateOptions))
-                } else {
-                    this.setNumThreads(4)
-                }
-            }
-        } else {
-            Interpreter.Options().apply{
-                this.setNumThreads(4)
-            }
-        }
-
-
+    fun setup() {
         val model = FileUtil.loadMappedFile(context, modelPath)
+        val options = Interpreter.Options()
+        options.numThreads = 4
         interpreter = Interpreter(model, options)
 
         val inputShape = interpreter?.getInputTensor(0)?.shape() ?: return
@@ -70,13 +47,6 @@ class Detector(
 
         tensorWidth = inputShape[1]
         tensorHeight = inputShape[2]
-
-        // If in case input shape is in format of [1, 3, ..., ...]
-        if (inputShape[1] == 3) {
-            tensorWidth = inputShape[2]
-            tensorHeight = inputShape[3]
-        }
-
         numChannel = outputShape[1]
         numElements = outputShape[2]
 
@@ -97,7 +67,7 @@ class Detector(
         }
     }
 
-    fun close() {
+    fun clear() {
         interpreter?.close()
         interpreter = null
     }
@@ -113,16 +83,18 @@ class Detector(
 
         val resizedBitmap = Bitmap.createScaledBitmap(frame, tensorWidth, tensorHeight, false)
 
-        val tensorImage = TensorImage(INPUT_IMAGE_TYPE)
+        val tensorImage = TensorImage(DataType.FLOAT32)
         tensorImage.load(resizedBitmap)
         val processedImage = imageProcessor.process(tensorImage)
         val imageBuffer = processedImage.buffer
 
-        val output = TensorBuffer.createFixedSize(intArrayOf(1, numChannel, numElements), OUTPUT_IMAGE_TYPE)
+        val output = TensorBuffer.createFixedSize(intArrayOf(1 , numChannel, numElements), OUTPUT_IMAGE_TYPE)
         interpreter?.run(imageBuffer, output.buffer)
+
 
         val bestBoxes = bestBox(output.floatArray)
         inferenceTime = SystemClock.uptimeMillis() - inferenceTime
+
 
         if (bestBoxes == null) {
             detectorListener.onEmptyDetect()
@@ -137,7 +109,7 @@ class Detector(
         val boundingBoxes = mutableListOf<BoundingBox>()
 
         for (c in 0 until numElements) {
-            var maxConf = CONFIDENCE_THRESHOLD
+            var maxConf = -1.0f
             var maxIdx = -1
             var j = 4
             var arrayIdx = c + numElements * j
